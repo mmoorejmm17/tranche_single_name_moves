@@ -12,14 +12,14 @@ wrong by construction (it is chosen to make the fit solvable); the point is a cl
 Needs the Quantifi Toolkit, which is installed in the system Python but not in the project .venv, so run this module with the system
 Python (it writes cache/recalibrated.parquet; cdx_spreads.spread_changes then reads that file and needs no Toolkit):
 
-    python src/cds_recalib.py            # recalibrate every conv_spread = 0 row in the store
+    python pricing/cds_recalib.py            # recalibrate every conv_spread = 0 row in the store
 """
 import math
 from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent      # project root (this file lives in src/)
+ROOT = Path(__file__).resolve().parent.parent      # project root (this file lives in pricing/)
 STORE_FILE = ROOT / 'cache' / 'spreads.parquet'
 OUT_FILE = ROOT / 'cache' / 'recalibrated.parquet'
 RATE = 0.04               # flat continuously compounded discount rate (user's assumption when no curve is available)

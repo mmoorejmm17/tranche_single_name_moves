@@ -3,11 +3,8 @@ import sys
 
 import pandas as pd
 
-# own utils: not pip-installed, so add the repo root to sys.path
+# own utils: not pip-installed, so add the repo root to sys.path (bbg_utils is imported lazily in get_index_members)
 BBG_UTILS_PATH = 'S:/Structured Credit/Matt Stuff/claude_repos/bbg_utils'
-if BBG_UTILS_PATH not in sys.path:
-    sys.path.insert(0, BBG_UTILS_PATH)
-from bbg_utils import bds_mm
 
 MAPPINGS_PATH = 'S:/Structured Credit/Matt Stuff/cds_mappings/cds_mappings_final.csv'
 
@@ -47,6 +44,9 @@ def get_index_members(index_ticker, mappings_path=MAPPINGS_PATH):
     bbg_cds_ticker, sp_id, Market_CDS_Ticker, markit_cds_ticker (NaN where the mappings file has no match).
     Requires a running Bloomberg Terminal session.
     """
+    if BBG_UTILS_PATH not in sys.path:
+        sys.path.insert(0, BBG_UTILS_PATH)
+    from bbg_utils import bds_mm
     members = (bds_mm(index_ticker, 'INDX_MEMBERS')
                .rename(columns=_COLMAP)
                .rename(columns={'security': 'index_ticker'}))

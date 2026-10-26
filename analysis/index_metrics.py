@@ -10,8 +10,8 @@ say how much of the index that is). all_upfront comes from Databricks (Markit's 
 Needs no Quantifi Toolkit, so it runs in the project .venv.
 
 DEFAULTED NAMES. Bloomberg's roster drops a defaulted name (weight 0), so the store never held it. teams.structured_credit_abhutra.credit_events says when each one left a series
-(index_ex_date). Such a name stays in its series at its original weight, with its own Databricks prices, up to the day before index_ex_date, and drops out from then on. Run
-refresh_defaulted() once (needs a Databricks login) to cache the events and those prices; without that cache the metrics fall back to the live roster only.
+(index_ex_date). Such a name stays in its series at its original weight, with its own Databricks prices, up to the day before index_ex_date, and drops out from then on. The owner caches the
+events and those prices with pricing/defaulted.py (needs a Databricks login); without that cache the metrics fall back to the live roster only.
 """
 import numpy as np
 import pandas as pd
@@ -20,48 +20,13 @@ import cdx_spreads as cs
 
 TOP_N = (5, 10)
 DDOF = 0          # population standard deviation (divide by N); 1 = sample (N - 1, Excel STDEV.S)
-METRICS_FILE = cs.CACHE_DIR / 'index_metrics.parquet'
-EVENTS_FILE = cs.CACHE_DIR / 'credit_events.parquet'
-DEFAULTED_FILE = cs.CACHE_DIR / 'defaulted_prices.parquet'
-DEFAULTED_FILL_FILE = cs.CACHE_DIR / 'addin_fill_defaulted.parquet'
-EVENTS_TABLE = 'teams.structured_credit_abhutra.credit_events'
-PRICE_TABLE = cs.TABLE
+METRICS_FILE = cs.DATA_DIR / 'index_metrics.parquet'
+EVENTS_FILE = cs.DATA_DIR / 'credit_events.parquet'
+DEFAULTED_FILE = cs.DATA_DIR / 'defaulted_prices.parquet'
+DEFAULTED_FILL_FILE = cs.DATA_DIR / 'addin_fill_defaulted.parquet'
 
 
-# ---- defaulted names --------------------------------------------------------------------------------------------------------------
-def refresh_defaulted():
-    """Cache the credit events (for the 40 series we track) and each defaulted name's Databricks all_upfront at its series' maturity, from the series launch to the day
-    before index_ex_date. Writes cache/credit_events.parquet and cache/defaulted_prices.parquet. Needs a Databricks login (browser window the first time)."""
-    conn = cs.get_conn()
-    try:
-        ev = pd.read_sql(f'SELECT sn_ticker, index_name, auction_date, index_ex_date, index_loss, index_recovery FROM {EVENTS_TABLE}', conn)
-        ev['auction_date'] = pd.to_datetime(ev['auction_date'])
-        ev['index_ex_date'] = pd.to_datetime(ev['index_ex_date'])
-        ev = ev[ev['index_name'].isin(cs.load_index_list()['index_name'])].reset_index(drop=True)
-        ev['maturity'] = [cs.get_index_maturity(i) for i in ev['index_name']]
-        ev['launch'] = [cs.index_launch_date(i) for i in ev['index_name']]
-        tick = ', '.join(f"'{t}'" for t in sorted(ev['sn_ticker'].unique()))
-        mats = ', '.join(f"'{m:%Y-%m-%d}'" for m in sorted(ev['maturity'].unique()))
-        px = pd.read_sql(f'SELECT market_cds_ticker, published_date, cds_maturity, running_coupon, all_upfront, par_spread, risky_pv01 FROM {PRICE_TABLE} '
-                         f"WHERE market_cds_ticker IN ({tick}) AND cds_maturity IN ({mats}) AND published_date >= '{cs.HISTORY_START}' AND all_upfront IS NOT NULL", conn)
-    finally:
-        conn.close()
-    px['published_date'] = pd.to_datetime(px['published_date'])
-    px['cds_maturity'] = pd.to_datetime(px['cds_maturity'])
-    ev.to_parquet(EVENTS_FILE, index=False)
-    rows = []
-    for e in ev.itertuples():
-        p = px[(px['market_cds_ticker'] == e.sn_ticker) & (px['cds_maturity'] == e.maturity) & (px['published_date'] >= e.launch) & (px['published_date'] < e.index_ex_date)]
-        p = p.drop_duplicates(['published_date'])
-        rows.append(p.assign(index_name=e.index_name, ex_date=e.index_ex_date)[['index_name', 'market_cds_ticker', 'published_date', 'cds_maturity', 'all_upfront', 'ex_date']])
-    out = pd.concat(rows, ignore_index=True)
-    out.to_parquet(DEFAULTED_FILE, index=False)
-    exp = pd.DataFrame({'index_name': ev['index_name'], 'ticker': ev['sn_ticker'], 'ex': ev['index_ex_date'], 'launch': ev['launch']})
-    got = out.groupby(['index_name', 'market_cds_ticker']).size().rename('priced_days')
-    print(f'{len(ev)} credit events in our series; {len(out):,} priced name-days cached for {out.groupby(["index_name", "market_cds_ticker"]).ngroups} of {len(ev)} (name, series) pairs')
-    return ev, out
-
-
+# ---- defaulted names (refresh_defaulted, which WRITES the cache, lives in pricing/defaulted.py) --------------------------------------
 def _defaulted(index_name):
     """Defaulted members of a series: DataFrame(market_cds_ticker, ex_date) and their cached prices, or empty frames if refresh_defaulted() has not been run."""
     if not (EVENTS_FILE.exists() and DEFAULTED_FILE.exists()):
@@ -141,13 +106,14 @@ def index_metrics(index_name, top_ns=TOP_N, ddof=DDOF, el=None):
     return out[cols].reset_index()
 
 
-def all_index_metrics(index_names=None, save=True):
-    """index_metrics for every index (or the given ones), stacked, saved to cache/index_metrics.parquet (exactly one row per index and date)."""
+def all_index_metrics(index_names=None, out_file=None):
+    """index_metrics for every index (or the given ones), stacked (exactly one row per index and date). Writes parquet only if out_file is given
+    (pricing/publish.py does that; the analysis side never writes into data/)."""
     names = list(index_names) if index_names else list(cs.load_index_list()['index_name'])
     out = pd.concat([index_metrics(n) for n in names], ignore_index=True)
     assert not out.duplicated(['index_name', 'published_date']).any()
-    if save:
-        out.to_parquet(METRICS_FILE, index=False)
+    if out_file is not None:
+        out.to_parquet(out_file, index=False)
     return out
 
 

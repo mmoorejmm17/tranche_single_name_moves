@@ -1,8 +1,8 @@
 """Fill the cells Databricks could not price from the Markit Excel add-in (waterfall source 2), at each index's own coupon.
 
-    python src/addin_fill.py plan       # size the job, nothing is pulled
-    python src/addin_fill.py pull       # pull every needed (ticker, node, coupon) through Excel; resumable (cache/addin_raw/full_*.parquet)
-    python src/addin_fill.py assemble   # interpolate half-year tenors, derive what the add-in lacks with cds_pricer, write cache/addin_fill.parquet
+    python pricing/addin_fill.py plan       # size the job, nothing is pulled
+    python pricing/addin_fill.py pull       # pull every needed (ticker, node, coupon) through Excel; resumable (cache/addin_raw/full_*.parquet)
+    python pricing/addin_fill.py assemble   # interpolate half-year tenors, derive what the add-in lacks with cds_pricer, write cache/addin_fill.parquet
 Run with the system Python (needs Excel + the add-in login for `pull`, the Quantifi Toolkit for `assemble`).
 
 A cell is 'unpriced' by cdx_spreads.priced_mask. Its tenor label comes from Databricks (markit_addin.tenor_map); an annual label is one add-in node, a half-year label
@@ -18,6 +18,7 @@ import time
 import numpy as np
 import pandas as pd
 
+import _paths  # noqa: F401  (first: points cdx_spreads at the working copy cache/)
 import cdx_spreads as cs
 import markit_addin as ma
 

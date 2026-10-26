@@ -1,19 +1,26 @@
 # tranche_single_name_moves
 
-## Project layout (reorganized 2026-10-25)
+## Project layout (pricing / analysis split, 2026-10-26)
+Writing the data and using it are separate exercises. The data is ONE standalone snapshot (`data/`) that only the owner (Matt) writes, by running `pricing/publish.py`; everyone else only READS it.
 ```
-CLAUDE.md, pyproject.toml, poetry.lock, poetry.toml, .gitignore
-src/         Python modules, flat (no package): cdx_members, cdx_spreads, cds_pricer, cds_recalib, markit_addin, addin_fill, index_metrics, charts.
-             Run scripts from the project root, e.g. `python src/cds_pricer.py`, `python src/addin_fill.py pull`; notebooks add src/ to sys.path in their first cell.
-notebooks/   index_spread_moves (spread / upfront / all_upfront / risky_pv01 moves between two dates), dispersion, topN, cdx_index_single_name_testing (early roster test).
-config/      hand-maintained inputs: cds_index.csv (the 40 indices), ticker_aliases.csv, ticker_ids.csv, and overrides.csv when it is created.
-docs/        markit_excel_guide/ (Markit add-in user guide and data dictionary).
-archive/     unmapped_members.xlsx (early mapping work, unused by the code).
-cache/       generated, gitignored: spreads.parquet (the store), priced_at_index_coupon.parquet, addin_fill*.parquet, index_metrics.parquet, credit_events / defaulted_prices, rosters and maturities.
-  _backups/  snapshots taken before each rebuild (safe to delete) and root_before_reorg_2026-10-25.zip (the project root as it was before this reorganization).
-  _priced_parts/  per-index working files of cds_pricer.price_store (safe to delete once priced_at_index_coupon.parquet exists).
+CLAUDE.md, pyproject.toml, poetry.lock, poetry.toml, .gitignore (cache/, data/, __pycache__, .venv, *.parquet)
+analysis/   READ side. cdx_spreads (spread_changes, priced_mask, show_table, reports), index_metrics (dispersion / top-N), charts. Reads ONLY data/; needs just pandas/pyarrow/numpy
+            (no Bloomberg, Databricks, Quantifi or Excel); never imports pricing/ and never writes anything.
+pricing/    WRITE side, owner only: cdx_store (update_store: Bloomberg rosters + Databricks rows), cdx_members, cds_pricer + cds_recalib (Quantifi), markit_addin + addin_fill (Excel add-in),
+            defaulted (credit events), publish (cache/ -> data/). `_paths.py` (imported first) points cdx_spreads at the working copy cache/ and config/.
+notebooks/  index_spread_moves, dispersion, topN (analysis only; first cell prints which snapshot they read).
+config/     hand-maintained inputs, read by pricing and copied into data/ on publish: cds_index.csv (the 40 indices), ticker_aliases.csv, ticker_ids.csv, overrides.csv (when created).
+data/       the PUBLISHED snapshot (gitignored; ~145 MB): spreads, priced_at_index_coupon, addin_fill*, index_metrics, credit_events, defaulted_prices, members_*.csv, index_maturity.csv,
+            cds_index.csv, overrides.csv, MANIFEST.json (published_at, store_through). Nobody edits it by hand.
+cache/      the pricing WORKING copy (gitignored): same files plus raw add-in pulls, _priced_parts/, backups. Can be mid-rebuild; analysis never reads it.
+docs/       markit_excel_guide/ (Markit add-in user guide and data dictionary).
+archive/    unmapped_members.xlsx (early mapping work, unused by the code).
 ```
-The Databricks / Bloomberg / Excel add-in steps need the SYSTEM Python (Quantifi Toolkit, Excel); the notebooks run in the project .venv.
+Workflow (owner): `update_store` -> `python pricing/cds_pricer.py` -> `python pricing/addin_fill.py pull|assemble` (-> `pricing/defaulted.py`) all write cache/; then `python pricing/publish.py` checks it, recomputes
+index_metrics, and copies cache/ + config/ into data/ (files renamed into place, MANIFEST.json last; publish while nobody is running the notebooks). `python pricing/publish.py --check` only checks.
+`update_store`: `python -c "import sys; sys.path.insert(0, 'pricing'); import cdx_store; cdx_store.update_store()"`. Scripts run from the project root; notebooks put analysis/ on sys.path in their first cell.
+Others running update_store is a possible future option, not a goal while the old missing data is being fixed. The pricing steps need the SYSTEM Python (Quantifi Toolkit, Excel); publish and the notebooks run in the project .venv.
+Where this file says `src/` or `cache/` below it predates the split: scripts are now in `pricing/`, readers in `analysis/`, and the notebooks read `data/`.
 
 ## Definition: PRICED (revised 2026-10-25; supersedes the earlier 5-stat version)
 A single-name CDS curve point (name, date, maturity) is **priced** if it has EITHER
@@ -177,7 +184,7 @@ Fields a filled row can lack depending on source: Bloomberg gives only the sprea
   (user's assumption; no ISDA curve source found). Replacement `conv_spread` = `CurveUtil.ImpliedSpread` at the maturity, `risky_pv01` = `CurveUtil.ImpliedDuration`.
 - The recovery mark is wrong by design (it just makes the fit solvable); the goal is a clean comparable mark. Because recovery floats with `all_upfront`, a name's
   recalibrated spread change includes the effect of its recovery moving between the two dates (e.g. Xerox 26.2% -> 21.2% on HY47).
-- The Toolkit is installed in the SYSTEM Python (module `Quantifi`), not the project `.venv`. So run `python src/cds_recalib.py` with the system Python (after
+- The Toolkit is installed in the SYSTEM Python (module `Quantifi`), not the project `.venv`. So run `python pricing/cds_recalib.py` with the system Python (after
   `update_store()`); it writes `cache/recalibrated.parquet` (gitignored). `cdx_spreads.spread_changes` reads that file with no Toolkit needed and marks those rows
   state `recal` (amber in the notebook, with the recovery used); without the file they stay `conv=0` (red). A manual override beats both. Re-run it whenever the store gains new rows.
 - Validation: same method at forced 40% recovery on the 90 normal HY47 names (2026-10-23) fitted 90/90 and reproduced Markit conv_spread with median error +1.0 bp
@@ -200,7 +207,7 @@ Fields a filled row can lack depending on source: Bloomberg gives only the sprea
 - risky_pv01 is stored to 2 decimals; refining it as all_upfront x 100 / par helps wide names but hurts tight ones (upfront off by up to 0.29 pts), so it is used as stored.
 
 ### Integration (2026-10-25)
-- `python src/cds_pricer.py` (system Python) writes `cache/priced_at_index_coupon.parquet` (all priced points re-priced at their index coupon, resumable per index via `cache/_priced_parts/`).
+- `python pricing/cds_pricer.py` (system Python) writes `cache/priced_at_index_coupon.parquet` (all priced points re-priced at their index coupon, resumable per index via `cache/_priced_parts/`).
   `cdx_spreads.spread_changes` then shows every spread / upfront / all_upfront / risky_pv01 AT THE INDEX COUPON with states ok / recoupon (quoted at the other coupon, blue) /
   recal (wide name, marked-down recovery, amber) / missing, incomplete (red). Without the file it falls back to the Markit coupon (and `cds_recalib.py` / `conv=0`).
   On HY47 (2026-09-29 -> 2026-10-23): 68 priced at 500, 22 re-priced from 100, 3 wide names, 7 never priced. `cds_recalib.py` is now superseded by the pricer for the display.
@@ -224,7 +231,7 @@ Fields a filled row can lack depending on source: Bloomberg gives only the sprea
   unfilled cells had no add-in row at any node: identifier/entity problems, not interpolation.
 
 ### Full add-in fill (2026-10-25): `addin_fill.py`, `config/ticker_aliases.csv`, and ticker changes
-- `python src/addin_fill.py plan|pull|assemble` (system Python). Pull is incremental (skips ids already in `cache/addin_raw/`), batches are named by content. 767 instruments, ~1.26M rows, 6 min of Excel.
+- `python pricing/addin_fill.py plan|pull|assemble` (system Python). Pull is incremental (skips ids already in `cache/addin_raw/`), batches are named by content. 767 instruments, ~1.26M rows, 6 min of Excel.
   Assemble interpolates half-year tenors (50/50 on conv/par/rpv01), derives risky_pv01 (add-in has it only from 2025-09-01) and upfront with `cds_pricer`, writes `cache/addin_fill.parquet`
   (key: index_name, market_cds_ticker, published_date, cds_maturity; columns conv_spread, par_spread, risky_pv01, upfront, all_upfront, route, rpv01_source, source='markit_addin') and
   `cache/addin_unfilled.parquet`. Result: **133,549 of 187,392 unpriced cells filled (71.3%)**: HY 71.3, IG 72.9, XO 73.3, MA 62.2%. 34,358 have the add-in's own risky_pv01, 99,190 derived.
@@ -265,7 +272,7 @@ coupon choice is involved. For each (index, date) there is exactly ONE row (`cac
 ### Recovery rule changed to continuous (2026-10-25)
 - `cds_pricer` now converts every upfront to a conv_spread at recovery = min(40%, 100 - all_upfront - 5) (`CONTINUOUS_MARKDOWN = True`), not 'try 40%, mark down if the fit fails'. Near the edge of what
   40% allows the standard conv_spread explodes (LUMN at all_upfront 71 solved to 19,000 bp, XRX up to 35,000) and then stops solving, so a move across that edge mixed two bases (Xerox on HY47 showed -9,282 bp).
-  With the continuous rule it is +706 bp. Normal names (all_upfront < 55) are unchanged (40%). 15,025 points with all_upfront > 50 were repriced in place (`python src/cds_pricer.py rewide`; 11,069 of them are now
+  With the continuous rule it is +706 bp. Normal names (all_upfront < 55) are unchanged (40%). 15,025 points with all_upfront > 50 were repriced in place (`python pricing/cds_pricer.py rewide`; 11,069 of them are now
   'recal'); backups: `cache/priced_at_index_coupon_before_continuous.parquet`, `cache/addin_fill_before_continuous.parquet`. Where Markit publishes a conv_spread for a name with all_upfront 55-65 (e.g. IHRT
   7,011 bp) our number now differs from Markit's because of the marked-down recovery; that was the user's stated trade-off (clean and comparable over matching Markit).
 
@@ -279,9 +286,9 @@ coupon choice is involved. For each (index, date) there is exactly ONE row (`cac
   `index_loss` / `index_recovery` give the realised loss to add to index-level metrics. Join key: (sn_ticker = market_cds_ticker, index_name).
 
 ### Defaulted-names fix: files and commands (2026-10-25)
-- `index_metrics.refresh_defaulted()` (venv, needs a Databricks login) caches `cache/credit_events.parquet` (56 events in our 40 series) and `cache/defaulted_prices.parquet` (Databricks all_upfront at the series maturity from launch to
+- `pricing/defaulted.py` (`refresh_defaulted()`; venv, needs a Databricks login) caches `cache/credit_events.parquet` (56 events in our 40 series) and `cache/defaulted_prices.parquet` (Databricks all_upfront at the series maturity from launch to
   index_ex_date - 1; only 12,625 of 25,598 expected name-days: SFRFP 90%, DISH 97%, ARGID 100%, nothing for ATOS, AVP, CASINO, DSPORT, LINTA, INTRUM, NFE, NFEFIN, RAD, TLN, since Markit's raw table has thin history for them).
-- The rest comes from the Markit add-in: `python src/addin_fill.py pull-defaulted` then `assemble-defaulted` (system Python) -> `cache/addin_fill_defaulted.parquet` (11,669 of 12,973 missing name-days, 89.9%). Those names are not in
+- The rest comes from the Markit add-in: `python pricing/addin_fill.py pull-defaulted` then `assemble-defaulted` (system Python) -> `cache/addin_fill_defaulted.parquet` (11,669 of 12,973 missing name-days, 89.9%). Those names are not in
   `cds_mappings_final.csv`, so their Markit tickers/tier/ccy/doc are in the project-local `config/ticker_ids.csv` (ATOS, AVP, CASINO->GROUPE, DSPORT->DIAMSPO, INTRUM->INTRUAB, LINTA->LITLC, NFEFIN, NFE->NEWFORAB, RAD; TLN is in the mappings).
   The add-in has full pre-default history for all of them (par_ok rows match each name's life up to its auction date).
 - Wide-name rule in `addin_fill.assemble` (applies to the main fill too): a par-based all_upfront saturates near 60 (a flat 40%-recovery model cannot exceed it; par above ~1,100 bp), so where the par-based value

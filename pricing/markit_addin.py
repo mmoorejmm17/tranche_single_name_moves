@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent      # project root (this file lives in src/)
+ROOT = Path(__file__).resolve().parent.parent      # project root (this file lives in pricing/)
 CACHE = ROOT / 'cache'
 RAW_DIR = CACHE / 'addin_raw'
 TENOR_MAP_FILE = CACHE / 'tenor_map.parquet'
