@@ -1,14 +1,14 @@
 """WRITE side of the store: pull the index rosters / maturities (Bloomberg) and the single-name rows (Databricks) into the working copy cache/.
 
 Only the owner runs this. The analysis code never imports it; it reads the snapshot that publish.py copies from cache/ into data/.
-Run from the project root with the venv or system Python: python -c "import sys; sys.path.insert(0, 'pricing'); import cdx_store; cdx_store.update_store()"
+Run from the project root with the venv or system Python: python pricing/daily/update.py
 """
 import _paths  # noqa: F401  (must come first: points cdx_spreads at the working copy cache/ and config/)
 import sys
 
 import pandas as pd
 
-from cdx_spreads import DATA_DIR as CACHE_DIR, SPREAD_COLS, STORE_COLS, STORE_FILE, index_coupon, load_index_list
+from cdx_spreads import PRICES_DIR, REF_DIR, SPREAD_COLS, STORE_COLS, STORE_FILE, index_coupon, load_index_list
 
 TABLE = 'teams.structured_credit_abhutra.cds_transform_interpolated'
 REPULL_DAYS = 7                                   # re-fetch this far back on update in case Databricks restated
@@ -51,8 +51,8 @@ def _bbg_ticker(index_name):
 
 def get_index_maturity(index_name, force_refresh=False):
     """The index's 5Y maturity date (BDP MATURITY). Static per series, so cached indefinitely."""
-    CACHE_DIR.mkdir(exist_ok=True)
-    path = CACHE_DIR / 'index_maturity.csv'
+    REF_DIR.mkdir(parents=True, exist_ok=True)
+    path = REF_DIR / 'index_maturity.csv'
     cache = pd.read_csv(path, index_col='index_name')['maturity'] if path.exists() else pd.Series(dtype=str, name='maturity')
     if force_refresh or index_name not in cache.index:
         mat = bdp_mm(_bbg_ticker(index_name), 'MATURITY')['MATURITY'].iloc[0]
@@ -63,8 +63,8 @@ def get_index_maturity(index_name, force_refresh=False):
 
 def get_constituents(index_name, force_refresh=False):
     """Non-zero-weight members (zero weight = defaulted, no longer in the index). A series' roster is static, so cached."""
-    CACHE_DIR.mkdir(exist_ok=True)
-    path = CACHE_DIR / f'members_{index_name}.csv'
+    (REF_DIR / 'members').mkdir(parents=True, exist_ok=True)
+    path = REF_DIR / 'members' / f'members_{index_name}.csv'
     if not force_refresh and path.exists():
         m = pd.read_csv(path, dtype=str)
         if 'markit_cds_ticker' in m.columns:   # rosters cached before this column existed get refetched
@@ -135,7 +135,7 @@ def update_store(index_names=None, rebuild=False):
     rebuilds that index's full members x dates grid (missing names become all-NaN rows, has_data=False).
     rebuild=True ignores what is stored and pulls full history.
     """
-    CACHE_DIR.mkdir(exist_ok=True)
+    PRICES_DIR.mkdir(parents=True, exist_ok=True)
     names = list(index_names) if index_names else list(load_index_list()['index_name'])
     store = pd.read_parquet(STORE_FILE) if STORE_FILE.exists() and not rebuild else None
     kept = [] if store is None else [store[~store['index_name'].isin(names)]]

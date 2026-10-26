@@ -12,16 +12,18 @@ wrong by construction (it is chosen to make the fit solvable); the point is a cl
 Needs the Quantifi Toolkit, which is installed in the system Python but not in the project .venv, so run this module with the system
 Python (it writes cache/recalibrated.parquet; cdx_spreads.spread_changes then reads that file and needs no Toolkit):
 
-    python pricing/cds_recalib.py            # recalibrate every conv_spread = 0 row in the store
+    python pricing/shared/cds_recalib.py            # recalibrate every conv_spread = 0 row in the store
 """
 import math
 from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent      # project root (this file lives in pricing/)
-STORE_FILE = ROOT / 'cache' / 'spreads.parquet'
-OUT_FILE = ROOT / 'cache' / 'recalibrated.parquet'
+ROOT = Path(__file__).resolve().parents[2]      # project root (this file lives in pricing/shared/)
+WORK = ROOT / 'cache' / 'work'                          # scratch (raw add-in pulls, resumable parts, backups)
+STORE_DIR = ROOT / 'cache' / 'base'                     # the working copy of the store (published into data/base by pricing/shared/publish.py)
+STORE_FILE = STORE_DIR / 'prices' / 'spreads.parquet'
+OUT_FILE = STORE_DIR / 'prices' / 'recalibrated.parquet'
 RATE = 0.04               # flat continuously compounded discount rate (user's assumption when no curve is available)
 RECOVERY_CUSHION = 5.0    # points of recovery left below 100 - all_upfront
 MIN_RECOVERY = 0.0        # recovery floor (%); if 100 - all_upfront - cushion is below this, it is clamped and flagged

@@ -180,7 +180,7 @@ def price_rows(rows, target_coupon, recovery=RECOVERY, rate=RATE):
 
 
 STORE_FILE = cr.STORE_FILE
-OUT_FILE = cr.ROOT / 'cache' / 'priced_at_index_coupon.parquet'
+OUT_FILE = cr.STORE_DIR / 'prices' / 'priced_at_index_coupon.parquet'
 POINT_KEY = ['market_cds_ticker', 'published_date', 'cds_maturity', 'running_coupon', 'index_coupon']
 
 
@@ -197,8 +197,8 @@ def price_store(index_names=None, out_file=OUT_FILE):
         st = st[st['index_name'].isin(list(index_names))]
     st = st[st['has_data']]
     import time
-    parts_dir = Path(out_file).parent / '_priced_parts'      # one file per index, so an interrupted run resumes where it stopped
-    parts_dir.mkdir(exist_ok=True)
+    parts_dir = cr.WORK / 'priced_parts'      # one file per index, so an interrupted run resumes where it stopped
+    parts_dir.mkdir(parents=True, exist_ok=True)
     names = list(dict.fromkeys(st['index_name']))
     print(f'{len(st):,} stored rows in {len(names)} indices; re-pricing at each index coupon (parts in {parts_dir})', flush=True)
     t0 = time.time()

@@ -18,10 +18,12 @@ from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent      # project root (this file lives in pricing/)
+ROOT = Path(__file__).resolve().parents[2]      # project root (this file lives in pricing/shared/)
 CACHE = ROOT / 'cache'
-RAW_DIR = CACHE / 'addin_raw'
-TENOR_MAP_FILE = CACHE / 'tenor_map.parquet'
+WORK = CACHE / 'work'                  # scratch: raw add-in pulls, tenor map, fill errors
+STORE = CACHE / 'base'                 # working copy of the store
+RAW_DIR = WORK / 'addin_raw'
+TENOR_MAP_FILE = WORK / 'tenor_map.parquet'
 MAPPINGS = 'S:/Structured Credit/Matt Stuff/cds_mappings/cds_mappings_final.csv'
 XLL = os.path.normpath(os.path.expandvars('%LOCALAPPDATA%/Programs/IHS Markit/IHS Markit Add-In for Microsoft Excel/ihsmExcel6x64.xll'))
 FIELDS = {'asOf': 'asOf', 'conv': 'curve.curvePoints.conventionalSpread', 'upfront': 'curve.curvePoints.upfront',
@@ -45,7 +47,7 @@ def tenor_map(refresh=False):
         conn.close()
     df['published_date'] = pd.to_datetime(df['published_date'])
     df['cds_maturity'] = pd.to_datetime(df['cds_maturity'])
-    CACHE.mkdir(exist_ok=True)
+    WORK.mkdir(parents=True, exist_ok=True)
     df.to_parquet(TENOR_MAP_FILE, index=False)
     return df
 

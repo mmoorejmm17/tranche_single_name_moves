@@ -7,17 +7,18 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-CACHE = ROOT / 'cache'
+ROOT = Path(__file__).resolve().parents[2]
+CACHE = ROOT / 'cache'                  # pricing working area
+STORE = CACHE / 'base'                  # working copy of the store 'base' (prices/ reference/ metrics/)
 CONFIG = ROOT / 'config'
-DATA = ROOT / 'data'
+DATA = ROOT / 'data' / 'base'           # the published store
 
-os.environ['CDS_DATA_DIR'] = str(CACHE)
+os.environ['CDS_DATA_DIR'] = str(STORE)
 os.environ['CDS_CONFIG_DIR'] = str(CONFIG)
-for _p in (ROOT / 'analysis', ROOT / 'pricing'):
+for _p in (ROOT / "analysis", ROOT / "pricing" / "shared", ROOT / "pricing" / "fix_history", ROOT / "pricing" / "daily"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
 _cs = sys.modules.get('cdx_spreads')
-if _cs is not None and Path(_cs.DATA_DIR) != CACHE:
+if _cs is not None and Path(_cs.DATA_DIR).resolve() != STORE.resolve():
     raise RuntimeError('cdx_spreads was imported before pricing/_paths.py and points at the published data/; import _paths first (restart the kernel).')

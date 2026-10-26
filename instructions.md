@@ -4,7 +4,7 @@ This repo analyses single-name CDS moves inside the CDX / iTraxx indices (spread
 You only need to **use** the data. The data is built and published by one person (Matt Moore) and lives on the shared drive; it is not in GitHub.
 
 ## What you need
-- Access to the shared drive `S:\Structured Credit\Matt Stuff\tranche_single_name_moves\` (the published data is in its `data\` folder, about 145 MB, read only for you).
+- Access to the shared drive `S:\Structured Credit\Matt Stuff\tranche_single_name_moves\` (the published data is in its `data\base\` folder, about 145 MB, read only for you).
 - Python 3.12+ with `pandas`, `numpy`, `pyarrow`, `ipykernel` (plus Jupyter or VS Code to open notebooks). Nothing else: no Bloomberg, Databricks, Quantifi or Excel.
 
 ## Set up
@@ -26,9 +26,10 @@ pip install pandas numpy pyarrow ipykernel
 3. The first cell prints which snapshot you are reading, e.g. `data published 2026-10-26 08:34; prices through 2026-10-23`.
 
 ## Where the data is read from
-The code looks, in order, at: the `CDS_DATA_DIR` environment variable; this clone's own `data\` folder (if it has a `MANIFEST.json`); then the shared-drive snapshot
-`S:\Structured Credit\Matt Stuff\tranche_single_name_moves\data`. A fresh clone has no `data\`, so it reads the shared drive automatically. If the drive is mapped to a different letter, or you want a
-local copy, copy that `data\` folder into the clone, or set `CDS_DATA_DIR` to it. Never edit files in `data\`.
+The data lives in a "store": a folder with `prices\`, `reference\`, `metrics\` and a `MANIFEST.json`. Today there is one store, `base`. The code looks, in order, at: the `CDS_DATA_DIR`
+environment variable (a store folder); this clone's own `data\base\` folder (if it has a `MANIFEST.json`); then the shared-drive store
+`S:\Structured Credit\Matt Stuff\tranche_single_name_moves\data\base`. A fresh clone has no `data\`, so it reads the shared drive automatically. If the drive is mapped to a different letter, or you want a
+local copy, copy that `data\base` folder into the clone as `data\base`, or set `CDS_DATA_DIR` to the `base` folder. Never edit files in `data\`.
 
 ## Ground rules
 - `analysis/` only reads data. It never writes, so you cannot damage the data store by running notebooks.
@@ -38,4 +39,4 @@ local copy, copy that `data\` folder into the clone, or set `CDS_DATA_DIR` to it
   `CLAUDE.md` has the definitions (what "priced" means, how all_upfront, dispersion and top-N are computed).
 
 ## Folders
-`analysis/` code that reads data, `notebooks/` the three notebooks, `data/` the published snapshot (not in git), `pricing/` owner-only code, `config/` hand-maintained inputs, `docs/` Markit user guide.
+`analysis/` code that reads data, `notebooks/` the three notebooks, `data/base/` the published data store (not in git), `pricing/` owner-only code, `config/` hand-maintained inputs, `docs/` Markit user guide.

@@ -1,8 +1,8 @@
 """Fill the cells Databricks could not price from the Markit Excel add-in (waterfall source 2), at each index's own coupon.
 
-    python pricing/addin_fill.py plan       # size the job, nothing is pulled
-    python pricing/addin_fill.py pull       # pull every needed (ticker, node, coupon) through Excel; resumable (cache/addin_raw/full_*.parquet)
-    python pricing/addin_fill.py assemble   # interpolate half-year tenors, derive what the add-in lacks with cds_pricer, write cache/addin_fill.parquet
+    python pricing/fix_history/addin_fill.py plan       # size the job, nothing is pulled
+    python pricing/fix_history/addin_fill.py pull       # pull every needed (ticker, node, coupon) through Excel; resumable (cache/addin_raw/full_*.parquet)
+    python pricing/fix_history/addin_fill.py assemble   # interpolate half-year tenors, derive what the add-in lacks with cds_pricer, write cache/addin_fill.parquet
 Run with the system Python (needs Excel + the add-in login for `pull`, the Quantifi Toolkit for `assemble`).
 
 A cell is 'unpriced' by cdx_spreads.priced_mask. Its tenor label comes from Databricks (markit_addin.tenor_map); an annual label is one add-in node, a half-year label
@@ -18,12 +18,15 @@ import time
 import numpy as np
 import pandas as pd
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "shared"))     # find _paths (it adds the other pricing folders and analysis/)
 import _paths  # noqa: F401  (first: points cdx_spreads at the working copy cache/)
 import cdx_spreads as cs
 import markit_addin as ma
 
-FILL_FILE = ma.CACHE / 'addin_fill.parquet'
-DEFAULTED_FILL_FILE = ma.CACHE / 'addin_fill_defaulted.parquet'
+FILL_FILE = ma.STORE / 'prices' / 'addin_fill.parquet'
+DEFAULTED_FILL_FILE = ma.STORE / 'prices' / 'addin_fill_defaulted.parquet'
 BATCH_IDS = 40
 
 
@@ -115,7 +118,7 @@ def pull(cells=None):
     with ma.AddinSession() as sess:
         errors = ma.pull_batches(batches, sess)
     print(f'pull finished in {(time.time() - t0) / 60:.1f} min; failed ids: {len(errors)}')
-    pd.Series(errors, dtype=str).to_csv(ma.CACHE / 'addin_fill_errors.csv')
+    pd.Series(errors, dtype=str).to_csv(ma.WORK / 'addin_fill_errors.csv')
 
 
 def assemble(cells=None, out_file=FILL_FILE, write_unfilled=True):
@@ -183,7 +186,7 @@ def assemble(cells=None, out_file=FILL_FILE, write_unfilled=True):
     top = left.groupby('market_cds_ticker').size().sort_values(ascending=False).head(15)
     print(f'still unpriced: {len(left):,} cells in {left.market_cds_ticker.nunique()} tickers; top:', top.to_dict())
     if write_unfilled:
-        left[['index_name', 'market_cds_ticker', 'member_name', 'published_date', 'cds_maturity', 'index_coupon', 'tenor']].to_parquet(ma.CACHE / 'addin_unfilled.parquet', index=False)
+        left[['index_name', 'market_cds_ticker', 'member_name', 'published_date', 'cds_maturity', 'index_coupon', 'tenor']].to_parquet(ma.WORK / 'addin_unfilled.parquet', index=False)
     return c
 
 

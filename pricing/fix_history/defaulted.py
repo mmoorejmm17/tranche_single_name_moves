@@ -1,4 +1,7 @@
 """Cache the credit events and the defaulted names' prices into the working copy cache/ (needs a Databricks login). Owner only; publish.py ships the result."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "shared"))     # find _paths (it adds the other pricing folders and analysis/)
 import _paths  # noqa: F401
 import pandas as pd
 

@@ -11,7 +11,7 @@ Needs no Quantifi Toolkit, so it runs in the project .venv.
 
 DEFAULTED NAMES. Bloomberg's roster drops a defaulted name (weight 0), so the store never held it. teams.structured_credit_abhutra.credit_events says when each one left a series
 (index_ex_date). Such a name stays in its series at its original weight, with its own Databricks prices, up to the day before index_ex_date, and drops out from then on. The owner caches the
-events and those prices with pricing/defaulted.py (needs a Databricks login); without that cache the metrics fall back to the live roster only.
+events and those prices with pricing/fix_history/defaulted.py (needs a Databricks login); without that cache the metrics fall back to the live roster only.
 """
 import numpy as np
 import pandas as pd
@@ -20,13 +20,13 @@ import cdx_spreads as cs
 
 TOP_N = (5, 10)
 DDOF = 0          # population standard deviation (divide by N); 1 = sample (N - 1, Excel STDEV.S)
-METRICS_FILE = cs.DATA_DIR / 'index_metrics.parquet'
-EVENTS_FILE = cs.DATA_DIR / 'credit_events.parquet'
-DEFAULTED_FILE = cs.DATA_DIR / 'defaulted_prices.parquet'
-DEFAULTED_FILL_FILE = cs.DATA_DIR / 'addin_fill_defaulted.parquet'
+METRICS_FILE = cs.METRICS_DIR / 'index_metrics.parquet'
+EVENTS_FILE = cs.REF_DIR / 'credit_events.parquet'
+DEFAULTED_FILE = cs.REF_DIR / 'defaulted_prices.parquet'
+DEFAULTED_FILL_FILE = cs.PRICES_DIR / 'addin_fill_defaulted.parquet'
 
 
-# ---- defaulted names (refresh_defaulted, which WRITES the cache, lives in pricing/defaulted.py) --------------------------------------
+# ---- defaulted names (refresh_defaulted, which WRITES the cache, lives in pricing/fix_history/defaulted.py) --------------------------------------
 def _defaulted(index_name):
     """Defaulted members of a series: DataFrame(market_cds_ticker, ex_date) and their cached prices, or empty frames if refresh_defaulted() has not been run."""
     if not (EVENTS_FILE.exists() and DEFAULTED_FILE.exists()):
@@ -43,7 +43,7 @@ def _defaulted(index_name):
 
 
 # ---- per-name expected loss -------------------------------------------------------------------------------------------------------
-def name_el(index_name):
+def name_el(index_name, manual=True):
     """One row per (member, date) with that name's all_upfront (expected loss, points) and its weight as a fraction of the original index notional; NaN where unpriced.
     Defaulted names appear (from their Databricks prices) up to the day before their index_ex_date."""
     members = cs.get_constituents(index_name)
@@ -64,9 +64,21 @@ def name_el(index_name):
     ev, px = _defaulted(index_name)
     if len(ev):
         std_w = float(w.mode().iloc[0])                                    # equal-weighted index: a defaulted name carried the same weight as every other member
-        d = px.merge(ev, on='market_cds_ticker')
-        d = d.assign(member_name=d['market_cds_ticker'] + ' (defaulted)', weight=std_w, defaulted=True).drop(columns='ex_date')
+        days = hist[['published_date']].drop_duplicates()
+        d = ev.merge(days, how='cross')
+        d = d[d['published_date'] < d['ex_date']]                           # every day it was still in the series; days without a price stay NaN (they show up as gaps)
+        d = d.merge(px[['market_cds_ticker', 'published_date', 'all_upfront', 'source']], on=['market_cds_ticker', 'published_date'], how='left')
+        d['source'] = d['source'].fillna('')
+        d = d.assign(member_name=d['market_cds_ticker'] + ' (defaulted)', cds_maturity=cs.get_index_maturity(index_name), weight=std_w, defaulted=True).drop(columns='ex_date')
         el = pd.concat([el, d[el.columns]], ignore_index=True)
+    mo = cs._load_manual() if manual else None      # manual=False: the picture WITHOUT the overrides (pricing/fix_history uses it to see what is still a gap)
+    if mo is not None:         # a manual override beats every other source for the cells it lists
+        m = mo.loc[mo['index_name'] == index_name, ['market_cds_ticker', 'published_date', 'cds_maturity', 'all_upfront']].rename(columns={'all_upfront': 'el_mo'})
+        el = el.merge(m, on=['market_cds_ticker', 'published_date', 'cds_maturity'], how='left')
+        use = el['el_mo'].notna()
+        el.loc[use, 'all_upfront'] = el.loc[use, 'el_mo']
+        el.loc[use, 'source'] = 'manual'
+        el = el.drop(columns='el_mo')
     return el
 
 
@@ -108,7 +120,7 @@ def index_metrics(index_name, top_ns=TOP_N, ddof=DDOF, el=None):
 
 def all_index_metrics(index_names=None, out_file=None):
     """index_metrics for every index (or the given ones), stacked (exactly one row per index and date). Writes parquet only if out_file is given
-    (pricing/publish.py does that; the analysis side never writes into data/)."""
+    (pricing/shared/publish.py does that; the analysis side never writes into data/)."""
     names = list(index_names) if index_names else list(cs.load_index_list()['index_name'])
     out = pd.concat([index_metrics(n) for n in names], ignore_index=True)
     assert not out.duplicated(['index_name', 'published_date']).any()
