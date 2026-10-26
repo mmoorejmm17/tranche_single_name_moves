@@ -1,0 +1,10 @@
+market_cds_ticker,markit_ticker,tier,ccy,doc,note
+ATOS,ATOS,SNRFOR,EUR,MM14,Atos SE (successor ATOSGRO from 2026-09-17); defaulted XO40 2024-10
+AVP,AVP,SNRFOR,USD,XR14,Avon Products; defaulted HY38-HY40 2024-09
+CASINO,GROUPE,SNRFOR,EUR,MM14,Casino Guichard-Perrachon (Markit ticker GROUPE); defaulted XO37-XO39 2023-09
+DSPORT,DIAMSPO,SNRFOR,USD,XR14,Diamond Sports Group; defaulted HY38-HY39 2023-04
+INTRUM,INTRUAB,SNRFOR,EUR,MM14,Intrum AB; defaulted XO37-XO42 2025-01
+LINTA,LITLC,SNRFOR,USD,XR14,Liberty Interactive LLC; defaulted HY38-HY46 2026-05
+NFEFIN,NFEFIN,SNRFOR,USD,XR14,NFE Financing LLC; defaulted HY43-HY45 2026-01
+NFE,NEWFORAB,SNRFOR,USD,XR14,New Fortress Energy Inc; defaulted HY43 2026-02
+RAD,RAD,SNRFOR,USD,XR14,Rite Aid Corp; defaulted HY38-HY41 2023-11

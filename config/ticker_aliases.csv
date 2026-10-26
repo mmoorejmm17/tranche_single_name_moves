@@ -1,0 +1,3 @@
+market_cds_ticker,markit_ticker,valid_from,valid_to,note
+COX,COX-CommInc,,2026-09-14,Cox Comms Inc (RED 2E6448); Markit moved the curve to COXCOM on 2026-09-15
+COX,COXCOM,2026-09-15,,Cox Comms LLC (RED 2E644Z)
