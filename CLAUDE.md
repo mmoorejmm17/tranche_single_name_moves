@@ -27,7 +27,12 @@ docs/       markit_excel_guide/ (Markit add-in user guide and data dictionary).
 archive/    unmapped_members.xlsx (early mapping work, unused by the code).
 ```
 Workflow (owner), all writing to cache/base (and cache/work) and ending with publish:
-- NEW pricing (daily): `python pricing/daily/update.py` -> `python pricing/shared/cds_pricer.py` (system Python) -> `python pricing/shared/publish.py`.
+- NEW pricing (daily) is TWO steps (system Python): `python pricing/daily/update.py`, then `python pricing/shared/publish.py`.
+  Step 1 pulls the new Databricks dates, drops a newest date that is not really loaded yet (<50% of cells have a row, e.g. today early on), prices only the new points (cds_pricer.price_new, plus a 7-day re-check
+  for restatements), then runs the Markit add-in for the names Databricks does not price (opens its own Excel window; skipped with a message if Excel / the Markit login is unavailable or with --no-addin:
+  tenor labels refreshed if needed, addin_fill.pull extends already-cached instruments by the new days, addin_fill.assemble_new is incremental, about 1 minute vs ~12 for a full `assemble`) and prints one summary
+  (priced by Databricks / add-in / overrides / still open, per name). Nothing is published. Step 2 copies the working store to data/base (previous version kept in data/_previous; refuses a mostly-empty newest
+  date unless --allow-partial; --restore undoes it). Names that stay open (e.g. COMM, ELOFR on 2026-10-26) can be estimated with a review sheet, see below.
 - REPAIR old missing data (fix_history), the standard process, one name at a time (system Python: it has Bloomberg, Quantifi and openpyxl):
   1. `python pricing/fix_history/review.py list` ranks the names with gaps (built on `gaps.py`, which also writes `cache/review/gaps.csv` with every gap run and its neighbouring prices).
   2. `python pricing/fix_history/review.py make SIRI` writes `cache/review/SIRI.xlsx`: sheet `review` has one row per missing date per index with years_left, bbg_5y (Bloomberg 5Y PX_LAST; ticker from
@@ -37,7 +42,14 @@ Workflow (owner), all writing to cache/base (and cache/work) and ending with pub
      neighbouring Markit prices, else flat. It is an estimate; SIRI worked because Markit has the name from 2024-11-26 to learn the ratio from.
   3. Fill `override_spread`, save, close, then `python pricing/fix_history/review.py ingest SIRI`: rewrites that name's rows in `config/overrides.csv` (tracked in git; the sheet is the single record for the name),
      writes `config/override_series/SIRI_review.csv` (one conv_spread per day) and prices every approved cell with Quantifi into `cache/overrides_priced.parquet` (par_spread, risky_pv01, upfront, all_upfront
-     derived from the conv_spread at the index coupon, flat curve). Un-approving a cell (blank it) and re-ingesting undoes it: nothing underneath is ever changed, the overlay just wins.
+     derived from the conv_spread at the index coupon). Un-approving a cell (blank it) and re-ingesting undoes it: nothing underneath is ever changed, the overlay just wins.
+     PRICING METHOD (decided 2026-10-26, tested on SIRI vs Markit's real numbers on 742 points since 2025): cells from a review sheet are priced off ONE FULL CURVE per date (`curve` column in overrides.csv;
+     files config/override_series/{T}_curve.csv = bbg_5y per date, {T}_ratios.csv = the fixed ratio per standard tenor, both written by ingest): a node at every standard tenor 0.5y..5y = bbg_5y x ratio(tenor),
+     with each approved conv_spread replacing the node at its own maturity, fitted with Quantifi (cds_pricer.fit_curve, flat 4% discount, 40% recovery), then each cell's par / risky_pv01 / upfront / all_upfront
+     is read off the curve at its maturity. A flat one-node curve per cell instead was biased low (5y: risky_pv01 -2.7%, all_upfront -0.6 pts); the full curve cuts that to about -0.6% / -0.1 pts. It assumes
+     the name's curve SHAPE has not moved materially (ratios are fixed per tenor). Falls back to flat per cell (route says so) if the date has no bbg_5y, a spread is above 1000 bp, or no curve fits; very short nodes
+     that cannot be fitted (the Friday before a roll) are dropped and retried. The ratio per tenor = median of the name's Markit conv / bbg 5Y over the overlap (guess.py; 5y forced to 1.0). Helpers:
+     cdx_spreads.imm_tenor(trade_date, maturity) and imm_maturity(trade_date, tenor) (20 Mar / 20 Sep roll, validated against all 23,820 Databricks tenor labels).
      (`overrides.py` is the engine and also accepts hand-written rows: index_name [blank = all], ticker, start_date, end_date, conv_spread, conv_spread_end [ramp], series, force, source, note.)
   4. `python pricing/shared/publish.py`. Overridden cells are state `override` (teal) in the notebooks and their own bucket in `priced_counts` / `pricing_coverage`; they feed index_metrics.
   `addin_fill.py pull|assemble` and `defaulted.py` are the other fix_history steps (see below). Waterfall in the analysis: override > Databricks > Markit add-in.

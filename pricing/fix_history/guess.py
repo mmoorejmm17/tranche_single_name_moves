@@ -1,8 +1,9 @@
 """Best-guess conv_spread for the dates a name has no price (used by review.py to fill the review sheet).
 
 Method per cell, in order:
-  'bbg5y x ratio'  Bloomberg's 5Y CDS for the name, scaled to the index's remaining maturity by the ratio markit_conv(T) / bbg_5y learned from this same name on the dates where
-                   both exist (separately for HY/XO 500-coupon and IG/MA 100-coupon indices). Needs a Bloomberg ticker (BBG_5Y_CDS_Ticker in the mappings file) and some overlap.
+  'bbg5y x ratio'  Bloomberg's 5Y CDS for the name times a FIXED ratio per standard tenor (imm_tenor: 5y, 4.5y, 4y ...): ratio(tenor) = median of markit_conv(tenor) / bbg_5y over the dates
+                   where both exist (separately for HY/XO 500-coupon and IG/MA 100-coupon indices), so a 4.5y contract always gets the same multiple of the 5Y whatever the date, and 5y is
+                   exactly 1.0. Needs a Bloomberg ticker (BBG_5Y_CDS_Ticker in the mappings file) and some overlap.
   'interp'         straight line (by calendar day) between the last priced conv_spread before the run and the first after it.
   'flat'           the nearest priced conv_spread, held, when only one side exists.
   'none'           nothing to go on; the cell is left for the owner.
@@ -20,8 +21,7 @@ import cdx_members
 import cdx_spreads as cs
 import cdx_store
 
-BIN = 0.25          # years of remaining maturity per ratio bin
-MIN_PTS = 5         # points a bin needs to be used
+MIN_PTS = 5         # points a tenor needs to get its own ratio
 
 
 def bbg_ticker_for(ticker):
@@ -38,31 +38,34 @@ def bbg_history(bbg_ticker, start, end):
 
 
 def markit_conv(ticker):
-    """conv_spread at each index's own coupon for every index and date where Markit (Databricks, then add-in) prices this name, with T = years to the index maturity."""
+    """conv_spread at each index's own coupon for every index and date where Markit (Databricks, then add-in) prices this name, with its standard tenor (imm_tenor) that day."""
     pr, ad = cs._load_priced(), cs._load_addin()
     out = []
     for i in cs.load_index_list()['index_name']:
         mat, ic = cs.get_index_maturity(i), cs.index_coupon(i)
         a = pr[(pr['market_cds_ticker'] == ticker) & (pr['cds_maturity'] == mat) & (pr['index_coupon'] == ic)][['published_date', 'conv_spread']]
         b = ad[(ad['market_cds_ticker'] == ticker) & (ad['index_name'] == i)][['published_date', 'conv_spread']]
-        out.append(pd.concat([a, b]).drop_duplicates('published_date').assign(index_name=i, coupon=ic, T=lambda d, mat=mat: (mat - d['published_date']).dt.days / 365.25))
+        out.append(pd.concat([a, b]).drop_duplicates('published_date').assign(index_name=i, coupon=ic, tenor=lambda d, mat=mat: np.round(cs.imm_tenor(d['published_date'], mat), 2)))
     return pd.concat(out, ignore_index=True)
 
 
 def fit_ratio(m, bbg):
-    """({coupon: DataFrame(ratio, n, lo, hi) indexed by remaining maturity bin}, the matched points with bbg and ratio)."""
+    """({coupon: DataFrame(ratio, n, lo, hi) indexed by standard tenor}, the matched points with bbg and ratio). One fixed ratio per tenor (the median over all overlap dates); the 5y ratio is
+    set to exactly 1.0 (the learned value is kept in the 'learned' column)."""
     m = m.assign(bbg=m['published_date'].map(bbg)).dropna(subset=['bbg'])
     m['ratio'] = m['conv_spread'] / m['bbg']
-    m['bin'] = (m['T'] / BIN).round() * BIN
     curves = {}
     for cpn, g in m.groupby('coupon'):
-        b = g.groupby('bin').agg(ratio=('ratio', 'median'), n=('ratio', 'size'), lo=('ratio', 'min'), hi=('ratio', 'max'))
-        curves[cpn] = b[b['n'] >= MIN_PTS]
+        b = g.groupby('tenor').agg(ratio=('ratio', 'median'), n=('ratio', 'size'), lo=('ratio', 'min'), hi=('ratio', 'max'))
+        b = b[b['n'] >= MIN_PTS].assign(learned=lambda d: d['ratio'])
+        if 5.0 in b.index:
+            b.loc[5.0, 'ratio'] = 1.0
+        curves[cpn] = b
     return curves, m
 
 
 def guess_cells(ticker, runs):
-    """One row per gap cell for `ticker`: index_name, market_cds_ticker, member_name, date, years_left, bbg_5y, best_guess, guess_method; and an info dict
+    """One row per gap cell for `ticker`: index_name, market_cds_ticker, member_name, date, imm_tenor (years, the standard tenor on that date), years_left, bbg_5y, best_guess, guess_method; and an info dict
     (bbg_ticker, curves, backtest = (n, mean abs error, median error, p90 abs error) or None, notes). `runs` is gaps.find_gaps() filtered to this name."""
     info = dict(bbg_ticker=bbg_ticker_for(ticker), curves={}, backtest=None, notes=[])
     bbg, curves = None, {}
@@ -72,7 +75,7 @@ def guess_cells(ticker, runs):
             curves, m = fit_ratio(markit_conv(ticker), bbg)
             info['curves'] = curves
             if curves:
-                pred = [np.interp(t, curves[c].index.values, curves[c]['ratio'].values) * b if c in curves and len(curves[c]) else np.nan for t, c, b in zip(m['T'], m['coupon'], m['bbg'])]
+                pred = [np.interp(t, curves[c].index.values, curves[c]['ratio'].values) * b if c in curves and len(curves[c]) else np.nan for t, c, b in zip(m['tenor'], m['coupon'], m['bbg'])]
                 err = (pd.Series(pred, index=m.index) - m['conv_spread']).dropna()
                 if len(err):
                     info['backtest'] = (len(err), err.abs().mean(), err.median(), err.abs().quantile(.9))
@@ -90,9 +93,10 @@ def guess_cells(ticker, runs):
         dates = pd.DatetimeIndex(sorted(cs.get_spread_history(r.index_name)['published_date'].unique()))
         dates = dates[(dates >= r.start_date) & (dates <= r.end_date)]
         T = np.asarray((mat - dates).days / 365.25)
+        tenor = np.round(cs.imm_tenor(dates, mat), 2)
         px = bbg.reindex(bbg.index.union(dates)).ffill().reindex(dates).values if bbg is not None else np.full(len(dates), np.nan)
         c = curves.get(cpn)
-        ratio = np.interp(T, c.index.values, c['ratio'].values) if c is not None and len(c) else np.full(len(dates), np.nan)
+        ratio = np.interp(tenor, c.index.values, c['ratio'].values) if c is not None and len(c) else np.full(len(dates), np.nan)
         g = px * ratio
         method = np.where(np.isnan(g), '', 'bbg5y x ratio')
         # fallback for the cells bbg x ratio could not give: straight line / flat between the neighbouring Markit prices
@@ -107,6 +111,6 @@ def guess_cells(ticker, runs):
             g = np.where(use, alt, g)
             method = np.where(use, alt_m, method)
         method = np.where(np.isnan(g), 'none', method)
-        rows.append(pd.DataFrame({'index_name': r.index_name, 'market_cds_ticker': r.market_cds_ticker, 'member_name': r.member_name, 'date': dates, 'years_left': T.round(2),
+        rows.append(pd.DataFrame({'index_name': r.index_name, 'market_cds_ticker': r.market_cds_ticker, 'member_name': r.member_name, 'date': dates, 'imm_tenor': cs.imm_tenor(dates, mat), 'years_left': T.round(2),
                                   'bbg_5y': px, 'best_guess': np.round(g, 2), 'guess_method': method}))
     return pd.concat(rows, ignore_index=True), info

@@ -159,6 +159,34 @@ class CdsCurvePricer:
                 f'{"STEC" if self.ccy == "EUR" else "SNAC"} terms, curve flat across tenors; route: {self.route}')
 
 
+def fit_curve(asof, mats, convs_bp, coupon_bp=500.0, ccy='USD', recovery=RECOVERY, rate=RATE, tk=None, curves=None):
+    """A multi-node survival curve through conventional-spread quotes (bp, at the standard coupon) at several maturities (flat discount curve, one recovery). Raises if no curve
+    fits (e.g. quotes that imply a negative forward hazard)."""
+    tk = tk or cr._toolkit()
+    curves = {} if curves is None else curves
+    key = (pd.Timestamp(asof), rate)
+    if key not in curves:
+        curves[key] = cr._flat_curve(tk, pd.Timestamp(asof), rate)
+    dc = curves[key]
+    terms = tk['CdsTerms'].Get('STEC' if ccy == 'EUR' else 'SNAC', ccy)
+    params = tk['SurvivalCurveParameters'](terms.DayCount, terms.Frequency, terms.BDConvention, terms.PremCalendar)
+    pts = sorted({pd.Timestamp(m): float(q) for m, q in zip(mats, convs_bp)}.items())
+    a = cr._dt(tk, pd.Timestamp(asof))
+    return tk['SurvivalCurve'].FitCDSQuotes(
+        name='curve', asOf=a, settle=tk['Dt'].AddDays(a, 1, None), ccy=ccy, category='Corp', isStandardContract=True, cdsQuoteType=tk['CDSQuoteType'].ConvSpread,
+        runningPremium=float(coupon_bp), parameters=params, discountCurve=dc, tenorNames=[f'N{i}' for i in range(len(pts))], tenorDates=[cr._dt(tk, m) for m, _ in pts],
+        quotes=[q for _, q in pts], recoveries=[recovery] * len(pts), recoveryDisp=0.0, eventDates=[None, None, None], refinanceCurve=None, corr=0.0,
+        convRecoveryRate=recovery, convDiscountCurve=dc, forcefit=False)
+
+
+def curve_stats(curve, maturity, coupon_bp, tk=None):
+    """par_spread, risky_pv01, upfront, all_upfront of the contract maturing on `maturity`, read off a fitted curve (same formulas as CdsCurvePricer.at_coupon)."""
+    tk = tk or cr._toolkit()
+    m = cr._dt(tk, pd.Timestamp(maturity))
+    par, rpv = tk['CurveUtil'].ImpliedSpread(curve, m) * 1e4, tk['CurveUtil'].ImpliedDuration(curve, m)
+    return dict(par_spread=par, risky_pv01=rpv, upfront=(par - coupon_bp) * rpv / 100.0, all_upfront=par * rpv / 100.0)
+
+
 def price_rows(rows, target_coupon, recovery=RECOVERY, rate=RATE):
     """Re-price a DataFrame of curve points at `target_coupon` (a number, or a Series/array aligned to `rows`, e.g. each row's index coupon).
 
@@ -220,6 +248,39 @@ def price_store(index_names=None, out_file=OUT_FILE):
 
 
 
+
+
+def price_new(index_names=None, out_file=OUT_FILE, recheck_days=7):
+    """Incremental price_store: price only the store points that are not in `out_file` yet, plus every point of the last `recheck_days` days before its latest date (update_store re-fetches
+    that window in case Databricks restated, so those are re-priced and replace what was there). Appends to `out_file` atomically; the parts directory of price_store is not used.
+    Returns (n_priced, DataFrame of the new points)."""
+    cols = ['index_name', 'index_coupon', 'market_cds_ticker', 'published_date', 'cds_maturity', 'currency', 'has_data', 'running_coupon',
+            'par_spread', 'risky_pv01', 'upfront', 'conv_spread']
+    st = pd.read_parquet(STORE_FILE, columns=cols)
+    if index_names is not None:
+        st = st[st['index_name'].isin(list(index_names))]
+    st = st[st['has_data']]
+    old = pd.read_parquet(out_file) if Path(out_file).exists() else None
+    if old is None:
+        raise FileNotFoundError(f'{out_file} does not exist yet: run price_store() once (about 44 minutes) before using price_new()')
+    since = old['published_date'].max() - pd.Timedelta(days=recheck_days)
+    have = old.loc[old['published_date'] < since, POINT_KEY]
+    pts = st.drop_duplicates(POINT_KEY)
+    pts = pts.merge(have.assign(_have=1), on=POINT_KEY, how='left')
+    pts = pts[pts['_have'].isna()].drop(columns='_have').reset_index(drop=True)
+    pts = pts[[is_priced(r.par_spread, r.risky_pv01, r.upfront, r.conv_spread, r.running_coupon) for r in pts.itertuples()]].reset_index(drop=True)
+    if pts.empty:
+        print('price_new: nothing new to price')
+        return 0, pts
+    o = price_rows(pts, pts['index_coupon'].values)
+    res = pd.concat([pts[POINT_KEY].reset_index(drop=True), o.drop(columns='coupon').reset_index(drop=True)], axis=1)
+    keep = old[old['published_date'] < since]
+    out = pd.concat([keep, res], ignore_index=True).drop_duplicates(POINT_KEY, keep='last')
+    tmp = Path(out_file).with_suffix('.tmp')
+    out.to_parquet(tmp, index=False)
+    tmp.replace(out_file)
+    print(f'price_new: priced {len(res):,} points ({res["published_date"].min():%Y-%m-%d} to {res["published_date"].max():%Y-%m-%d}) | conv_status {res.conv_status.value_counts().to_dict()} | file now {len(out):,} points')
+    return len(res), res
 
 
 def reprice_wide(threshold=50.0, out_file=OUT_FILE):

@@ -107,13 +107,26 @@ def plan(cells=None):
     return cells, nd, inst, batches
 
 
-def pull(cells=None):
+def pull(cells=None, extend=True):
+    """Pull what the add-in cache lacks: instruments never pulled (their whole needed date range) and, with extend=True, NEW DAYS for instruments already pulled (only the days after the
+    latest date stored for each, so a daily run costs a minute, not the 6 of a full pull)."""
     cells, nd, inst, batches = plan(cells)
-    have = set(ma.load_raw().id.unique()) if any(ma.RAW_DIR.glob('*.parquet')) else set()
+    raw = ma.load_raw() if any(ma.RAW_DIR.glob('*.parquet')) else None
+    have = set(raw.id.unique()) if raw is not None else set()
     nd_new = nd[~nd.id.isin(have)]
     if len(nd_new) < len(nd):
         inst, batches = plan_batches(nd_new)
         print(f'already pulled: {len(have)} ids; still to pull: {len(inst)} instruments in {len(batches)} batches')
+    if extend and raw is not None:
+        last = raw.groupby('id')['date'].max()
+        old = nd[nd.id.isin(have)]
+        ext = old[old['published_date'] > old['id'].map(last)]
+        if len(ext):
+            inst_e, batches_e = plan_batches(ext, prefix='ext')
+            print(f'new days for ids already pulled: {len(inst_e)} instruments, {ext["published_date"].min():%Y-%m-%d} to {ext["published_date"].max():%Y-%m-%d}, in {len(batches_e)} batches')
+            batches = batches + batches_e
+        else:
+            print('no new days needed for ids already pulled')
     t0 = time.time()
     with ma.AddinSession() as sess:
         errors = ma.pull_batches(batches, sess)
@@ -190,8 +203,40 @@ def assemble(cells=None, out_file=FILL_FILE, write_unfilled=True):
     return c
 
 
+FILL_KEY = ['index_name', 'market_cds_ticker', 'published_date', 'cds_maturity']
+
+
+def assemble_new(recheck_days=7, out_file=FILL_FILE):
+    """Incremental assemble (seconds-minutes instead of the ~12 minutes of a full one). Keeps every fill row older than `recheck_days` before the store's latest date that is still an
+    unpriced cell, and re-builds the rest: the recent days (restated / newly arrived data) plus every unpriced cell that has no fill yet (a cell Databricks cannot price may become fillable
+    when the add-in cache gains days). Run `assemble` (full) after changing the assembly rules or after bulk raw pulls."""
+    cells = unpriced_cells()
+    old = pd.read_parquet(out_file) if Path(out_file).exists() else None
+    if old is None:
+        print('no fill file yet: running a full assemble')
+        return assemble(cells, out_file)
+    since = cells['published_date'].max() - pd.Timedelta(days=recheck_days)
+    ck = cells[FILL_KEY].apply(tuple, axis=1)
+    have = set(old[FILL_KEY].apply(tuple, axis=1))
+    work = cells[(cells['published_date'] >= since) | ~ck.isin(have)]
+    keep = old[(old['published_date'] < since) & old[FILL_KEY].apply(tuple, axis=1).isin(set(ck))]      # still an unpriced cell (Databricks has not since priced it)
+    print(f'assemble_new: keeping {len(keep):,} existing fill rows; re-building {len(work):,} cells ({since:%Y-%m-%d} onward, plus {int((~ck.isin(have) & (cells["published_date"] < since)).sum()):,} older cells with no fill)')
+    tmp = Path(out_file).with_suffix('.new.parquet')
+    assemble(work, tmp, write_unfilled=False)
+    new = pd.read_parquet(tmp)
+    tmp.unlink()
+    out = pd.concat([keep, new], ignore_index=True).drop_duplicates(FILL_KEY, keep='last')
+    out.to_parquet(Path(out_file).with_suffix('.tmp'), index=False)
+    Path(out_file).with_suffix('.tmp').replace(out_file)
+    print(f'wrote {out_file}: {len(out):,} cells ({len(new):,} rebuilt)')
+    return out
+
+
 if __name__ == '__main__':
     cmd = sys.argv[1]
+    if cmd == 'assemble-new':
+        assemble_new()
+        sys.exit(0)
     if cmd == 'plan-defaulted':
         plan(defaulted_cells())
     elif cmd == 'pull-defaulted':

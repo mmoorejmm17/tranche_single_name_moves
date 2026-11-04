@@ -1,7 +1,8 @@
-index_name,market_cds_ticker,start_date,end_date,conv_spread,conv_spread_end,force,series,source,note
-HY38,SIRI,2022-04-01,2024-11-25,,,,SIRI_bbg.csv,bloomberg SIRI CDS USD SR 5Y D14 Corp x maturity ratio,estimate: bbg 5Y scaled to index maturity by Markit ratio learned on overlap (2026-10-26)
-HY39,SIRI,2022-09-27,2024-11-25,,,,SIRI_bbg.csv,bloomberg SIRI CDS USD SR 5Y D14 Corp x maturity ratio,estimate: bbg 5Y scaled to index maturity by Markit ratio learned on overlap (2026-10-26)
-HY40,SIRI,2023-03-27,2024-11-25,,,,SIRI_bbg.csv,bloomberg SIRI CDS USD SR 5Y D14 Corp x maturity ratio,estimate: bbg 5Y scaled to index maturity by Markit ratio learned on overlap (2026-10-26)
-HY41,SIRI,2023-09-27,2024-11-25,,,,SIRI_bbg.csv,bloomberg SIRI CDS USD SR 5Y D14 Corp x maturity ratio,estimate: bbg 5Y scaled to index maturity by Markit ratio learned on overlap (2026-10-26)
-HY42,SIRI,2024-03-27,2024-11-25,,,,SIRI_bbg.csv,bloomberg SIRI CDS USD SR 5Y D14 Corp x maturity ratio,estimate: bbg 5Y scaled to index maturity by Markit ratio learned on overlap (2026-10-26)
-HY43,SIRI,2024-09-27,2024-11-25,,,,SIRI_bbg.csv,bloomberg SIRI CDS USD SR 5Y D14 Corp x maturity ratio,estimate: bbg 5Y scaled to index maturity by Markit ratio learned on overlap (2026-10-26)
+index_name,market_cds_ticker,start_date,end_date,conv_spread,conv_spread_end,force,series,curve,source,note
+HY38,SIRI,2022-04-01,2024-11-25,,,,SIRI_review.csv,SIRI,bloomberg SIRI 5Y x fixed ratio per tenor,estimate (Markit has no SIRI before 2024-11-26); approved by owner 2026-10-27
+HY39,SIRI,2022-09-27,2024-11-25,,,,SIRI_review.csv,SIRI,bloomberg SIRI 5Y x fixed ratio per tenor,estimate (Markit has no SIRI before 2024-11-26); approved by owner 2026-10-27
+HY40,SIRI,2023-03-27,2024-11-25,,,,SIRI_review.csv,SIRI,bloomberg SIRI 5Y x fixed ratio per tenor,estimate (Markit has no SIRI before 2024-11-26); approved by owner 2026-10-27
+HY41,SIRI,2023-09-27,2024-11-25,,,,SIRI_review.csv,SIRI,bloomberg SIRI 5Y x fixed ratio per tenor,estimate (Markit has no SIRI before 2024-11-26); approved by owner 2026-10-27
+HY42,SIRI,2024-03-27,2024-11-25,,,,SIRI_review.csv,SIRI,bloomberg SIRI 5Y x fixed ratio per tenor,estimate (Markit has no SIRI before 2024-11-26); approved by owner 2026-10-27
+HY43,SIRI,2024-09-27,2024-11-25,,,,SIRI_review.csv,SIRI,bloomberg SIRI 5Y x fixed ratio per tenor,estimate (Markit has no SIRI before 2024-11-26); approved by owner 2026-10-27
+,COMM,2022-04-01,2099-12-31,50,,,,,"owner: deadbox (no deliverable bonds), flat 50bp across the curve",fills only cells with no price; applies to new days automatically (re-run overrides.py / update.py)

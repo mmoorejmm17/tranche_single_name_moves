@@ -1,11 +1,11 @@
 """The standard way to repair a name's missing history: a review spreadsheet per name. Use the SYSTEM Python (Bloomberg, Quantifi and openpyxl are all there).
 
     python pricing/fix_history/review.py list                  # which names have gaps, biggest first
-    python pricing/fix_history/review.py make SIRI [MDC ...]   # writes cache/review/SIRI.xlsx
+    python pricing/fix_history/review.py make SIRI [MDC ...]   # writes cache/review/SIRI.xlsx (add --fresh to ignore earlier entries: the override column starts blank)
     ... open it in Excel, fill the yellow `override_spread` column (copy/paste `best_guess` where you agree, type your own where you don't), save, CLOSE it ...
     python pricing/fix_history/review.py ingest SIRI           # reads the sheet, updates config/overrides.csv, prices the cells with Quantifi
 
-Sheet `review`, one row per missing date per index: index_name | ticker | name | date | years_left | bbg_5y (Bloomberg 5Y PX_LAST) | best_guess | guess_method | override_spread |
+Sheet `review`, one row per missing date per index: index_name | index_mat_fmt | ticker | name | date | date_fmt | imm_tenor (the standard tenor that day, e.g. 2.5y) | years_left | bbg_5y (Bloomberg 5Y PX_LAST) | best_guess | guess_method | override_spread |
 source | note | status.  `override_spread` is the ONLY thing that counts: blank = still a gap (not approved), a number = the conv_spread in bp at the index coupon you approve.
 `source` / `note` are free text recorded with each approval (they default to the guess method). Sheet `runs` lists the gaps with the neighbouring Markit prices and the fit;
 sheet `charts` plots bbg_5y, best_guess and your override per index so you can eyeball it. Re-running `make` is safe: it keeps what you already entered (and what is already approved)
@@ -30,9 +30,16 @@ from _paths import CACHE, CONFIG
 REVIEW_DIR = CACHE / 'review'
 SERIES_DIR = CONFIG / 'override_series'
 OVERRIDES = CONFIG / 'overrides.csv'
-OV_COLS = ['index_name', 'market_cds_ticker', 'start_date', 'end_date', 'conv_spread', 'conv_spread_end', 'force', 'series', 'source', 'note']
-SHEET_COLS = ['index_name', 'ticker', 'name', 'date', 'years_left', 'bbg_5y', 'best_guess', 'guess_method', 'override_spread', 'source', 'note', 'status']
+OV_COLS = ['index_name', 'market_cds_ticker', 'start_date', 'end_date', 'conv_spread', 'conv_spread_end', 'force', 'series', 'curve', 'source', 'note']
+SHEET_COLS = ['index_name', 'index_mat_fmt', 'ticker', 'name', 'date', 'date_fmt', 'imm_tenor', 'years_left', 'bbg_5y', 'best_guess', 'guess_method', 'override_spread', 'source', 'note', 'status']
 COL = {c: i + 1 for i, c in enumerate(SHEET_COLS)}
+
+
+def _dates(df):
+    """The row dates of a sheet: from the text column date_fmt (YYYY-MM-DD) when present, else from `date` (so a sheet edited in a tool that mangles Excel dates still reads)."""
+    if 'date_fmt' in df.columns and df['date_fmt'].notna().all():
+        return pd.to_datetime(df['date_fmt'].astype(str).str.strip())
+    return pd.to_datetime(df['date'])
 
 
 def _letter(c):
@@ -62,15 +69,16 @@ def _existing(ticker, path):
         shutil.copy2(path, tmp)
         old = pd.read_excel(tmp, sheet_name='review')
         tmp.unlink()
+        old['row_date'] = _dates(old)
         for r in old.itertuples():
             if pd.notna(r.override_spread):
-                vals[(r.index_name, pd.Timestamp(r.date))] = (float(r.override_spread), r.source if isinstance(r.source, str) else '', r.note if isinstance(r.note, str) else '')
+                vals[(r.index_name, r.row_date)] = (float(r.override_spread), r.source if isinstance(r.source, str) else '', r.note if isinstance(r.note, str) else '')
             else:
-                vals.pop((r.index_name, pd.Timestamp(r.date)), None)       # the owner cleared it
+                vals.pop((r.index_name, r.row_date), None)       # the owner cleared it
     return vals
 
 
-def make(ticker):
+def make(ticker, fresh=False):
     from openpyxl import Workbook
     from openpyxl.chart import LineChart, Reference
     from openpyxl.chart.series import SeriesLabel
@@ -84,7 +92,7 @@ def make(ticker):
     if runs.empty:
         print(f'{ticker}: no gaps (or only defaulted-name days, which review sheets do not cover)')
         return
-    prior = _existing(ticker, path)
+    prior = {} if fresh else _existing(ticker, path)       # fresh: ignore what was entered / applied before (override column starts blank)
     cells, info = gs.guess_cells(ticker, runs)
     cells = cells.sort_values(['index_name', 'date']).reset_index(drop=True)
     keep = [prior.get((r.index_name, r.date)) for r in cells.itertuples()]
@@ -103,9 +111,9 @@ def make(ticker):
         cell = ws.cell(1, c, name)
         cell.font, cell.fill, cell.alignment = Font(bold=True, color='FFFFFF'), head_fill, Alignment(horizontal='center')
     for i, r in enumerate(cells.itertuples(), 2):
-        vals = [r.index_name, r.market_cds_ticker, r.member_name, r.date.to_pydatetime(), r.years_left, None if pd.isna(r.bbg_5y) else float(r.bbg_5y),
-                None if pd.isna(r.best_guess) else float(r.best_guess), r.guess_method, None if pd.isna(r.override_spread) else float(r.override_spread), r.source, r.note,
-                f'=IF({_letter("override_spread")}{i}="","OPEN","ok")']
+        vals = [r.index_name, f'{cs.get_index_maturity(r.index_name):%Y-%m-%d}', r.market_cds_ticker, r.member_name, r.date.to_pydatetime(), f'{r.date:%Y-%m-%d}', cs.imm_tenor_label(r.imm_tenor), r.years_left,
+                None if pd.isna(r.bbg_5y) else float(r.bbg_5y), None if pd.isna(r.best_guess) else float(r.best_guess), r.guess_method,
+                None if pd.isna(r.override_spread) else float(r.override_spread), r.source, r.note, f'=IF({_letter("override_spread")}{i}="","OPEN","ok")']
         for c, v in enumerate(vals, 1):
             ws.cell(i, c, v)
         ws.cell(i, COL['date']).number_format = 'yyyy-mm-dd'
@@ -116,7 +124,7 @@ def make(ticker):
         for c in ('override_spread', 'source', 'note'):
             ws.cell(i, COL[c]).fill = in_fill
     n = len(cells) + 1
-    for c, w in {'index_name': 11, 'ticker': 9, 'name': 26, 'date': 12, 'years_left': 10, 'bbg_5y': 9, 'best_guess': 11, 'guess_method': 15, 'override_spread': 16, 'source': 28, 'note': 40, 'status': 9}.items():
+    for c, w in {'index_name': 11, 'index_mat_fmt': 13, 'ticker': 9, 'name': 26, 'date': 12, 'date_fmt': 12, 'imm_tenor': 10, 'years_left': 10, 'bbg_5y': 9, 'best_guess': 11, 'guess_method': 15, 'override_spread': 16, 'source': 28, 'note': 40, 'status': 9}.items():
         ws.column_dimensions[_letter(c)].width = w
     ws.freeze_panes = 'A2'
     ws.auto_filter.ref = f'A1:{_letter("status")}{n}'
@@ -148,15 +156,26 @@ def make(ticker):
         row += 1
     for cpn, c in info['curves'].items():
         row += 1
-        rs.cell(row, 1, f'ratio markit_conv / bbg_5y by years to maturity, {cpn} coupon indices').font = Font(bold=True)
+        rs.cell(row, 1, f'FIXED ratio markit_conv / bbg_5y by standard tenor (median over the overlap; 5y forced to 1.0), {cpn} coupon indices').font = Font(bold=True)
         row += 1
-        for j, h in enumerate(['years_left', 'ratio', 'n_points'], 1):
+        for j, h in enumerate(['imm_tenor', 'ratio', 'n_points', 'learned_ratio'], 1):
             rs.cell(row, j, h).font = Font(bold=True)
         for t, rr in c.iterrows():
             row += 1
             rs.cell(row, 1, float(t))
             rs.cell(row, 2, round(float(rr['ratio']), 3))
             rs.cell(row, 3, int(rr['n']))
+            rs.cell(row, 4, round(float(rr['learned']), 3))
+
+    rt = wb.create_sheet('ratios')          # the fixed ratios, read back by ingest so overrides.py can price off a full curve
+    for j, h in enumerate(['coupon', 'tenor', 'ratio', 'n_points'], 1):
+        rt.cell(1, j, h).font = Font(bold=True)
+    rrow = 2
+    for cpn, c in info['curves'].items():
+        for t, rr in c.iterrows():
+            for j, v in enumerate([int(cpn), float(t), round(float(rr['ratio']), 4), int(rr['n'])], 1):
+                rt.cell(rrow, j, v)
+            rrow += 1
 
     cs_ = wb.create_sheet('charts')
     pos, top = 2, 1
@@ -201,9 +220,13 @@ def ingest(ticker, price=True):
     tmp = REVIEW_DIR / '_read.xlsx'
     shutil.copy2(path, tmp)                                      # Excel may still hold the original open
     sh = pd.read_excel(tmp, sheet_name='review')
+    try:
+        rat = pd.read_excel(tmp, sheet_name='ratios')
+    except ValueError:                                           # a sheet made before ratios were saved: flat pricing
+        rat = None
     tmp.unlink()
     sh = sh[sh['ticker'] == ticker].copy()
-    sh['date'] = pd.to_datetime(sh['date'])
+    sh['date'] = _dates(sh)
     ov = pd.to_numeric(sh['override_spread'], errors='coerce')
     bad = sh[sh['override_spread'].notna() & ~(ov > 0)]
     if len(bad):
@@ -216,6 +239,13 @@ def ingest(ticker, price=True):
 
     SERIES_DIR.mkdir(exist_ok=True)
     series_file = f'{ticker}_review.csv'
+    curve_name = ''
+    if rat is not None and len(rat) and sh['bbg_5y'].notna().any():      # lets overrides.py price off one full curve per date (bbg 5y x fixed ratios, your approvals as nodes)
+        rat[['coupon', 'tenor', 'ratio']].to_csv(SERIES_DIR / f'{ticker}_ratios.csv', index=False)
+        sh.dropna(subset=['bbg_5y']).drop_duplicates('date')[['date', 'bbg_5y']].sort_values('date').to_csv(SERIES_DIR / f'{ticker}_curve.csv', index=False, date_format='%Y-%m-%d')
+        curve_name = ticker
+    else:
+        print('  note: no ratios sheet / bbg_5y in this review sheet, so these cells are priced on a flat curve (re-run `make` to get full-curve pricing)')
     old = pd.read_csv(OVERRIDES, dtype=str, encoding='utf-8-sig').fillna('') if OVERRIDES.exists() else pd.DataFrame(columns=OV_COLS)
     for c in OV_COLS:
         if c not in old.columns:
@@ -230,7 +260,7 @@ def ingest(ticker, price=True):
         run = ((g['pos'].diff() != 1) | (g['source'] != g['source'].shift()) | (g['note'] != g['note'].shift())).cumsum()
         for _, r in g.groupby(run):
             rows.append(dict(index_name=idx, market_cds_ticker=ticker, start_date=f'{r["date"].min():%Y-%m-%d}', end_date=f'{r["date"].max():%Y-%m-%d}', conv_spread='',
-                             conv_spread_end='', force='', series=series_file, source=r['source'].iloc[0], note=r['note'].iloc[0]))
+                             conv_spread_end='', force='', series=series_file, curve=curve_name, source=r['source'].iloc[0], note=r['note'].iloc[0]))
     new = pd.concat([keep, pd.DataFrame(rows, columns=OV_COLS)], ignore_index=True).fillna('')
     done[['index_name', 'date', 'conv_spread']].sort_values(['index_name', 'date']).to_csv(SERIES_DIR / series_file, index=False, date_format='%Y-%m-%d')
     new.to_csv(OVERRIDES, index=False, lineterminator='\r\n')
@@ -254,7 +284,7 @@ if __name__ == '__main__':
         list_gaps()
     elif cmd == 'make' and args:
         for t in args:
-            make(t)
+            make(t, fresh='--fresh' in sys.argv)
     elif cmd == 'ingest' and args:
         for t in args:
             ingest(t, price='--no-price' not in sys.argv)

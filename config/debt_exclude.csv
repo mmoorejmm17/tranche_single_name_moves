@@ -1,0 +1,45 @@
+market_cds_ticker,reason
+BAC,US bank
+C,US bank
+GS,US bank
+JPM,US bank
+MS,US bank
+WFC,US bank
+CFG,US bank
+CM,Canadian bank
+MTB,US bank
+USB,US bank
+COF,US bank
+COFB,US bank (Capital One Bank USA)
+COF A,US bank (Capital One NA)
+JEF,broker-dealer
+ACAFP,EU bank
+BACR,UK bank
+BACRED,EU bank (Mediobanca)
+BBVASM,EU bank
+BNP,EU bank
+CMZB,EU bank
+DANBNK,EU bank
+DB,EU bank
+HSBC,UK bank
+INTNED,EU bank
+ISPIM,EU bank
+LLOYDS,UK bank
+NWG,UK bank
+RABOBK,EU bank
+SANTAN,EU bank
+SHBASS,EU bank
+SOCGEN,EU bank
+STANLN,UK bank
+SWEDA,EU bank
+UBS,EU bank
+UCGIM,EU bank
+CSAG,EU bank (Credit Suisse)
+APODS,Fin index in mappings
+ARCC,Fin index in mappings
+BCRED,Fin index in mappings
+EQR,Fin index in mappings
+HIG,Fin index in mappings
+MMC,Fin index in mappings
+SYF,Fin index in mappings
+TFC,Fin index in mappings

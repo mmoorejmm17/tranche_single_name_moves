@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 # READ SIDE. Everything in analysis/ only READS the published snapshot in data/ (written by pricing/shared/publish.py, never by the notebooks).
@@ -73,6 +74,41 @@ def get_constituents(index_name):
     if not path.exists():
         raise FileNotFoundError(f'{path} missing: no published data for {index_name}')
     return pd.read_csv(path, dtype=str).assign(weight=lambda d: pd.to_numeric(d['weight']))
+
+
+def imm_tenor(trade_date, maturity):
+    """The standard tenor (in years: 0.5, 1, 1.5 ... 5 ...) a single-name CDS maturity sits at on a trade date. Scalars, arrays or Series in; floats / an array out.
+
+    Every single-name CDS (and every CDX / iTraxx index, whenever that index itself rolls) follows the same 20 Mar / 20 Sep roll: from the roll date the 5Y contract matures on the
+    20 Jun (after 20 Mar) or 20 Dec (after 20 Sep) five years on, i.e. 5.25y away on the roll date and about 4.75y away just before the next one. A maturity's tenor is 5Y minus the
+    number of months between it and that 5Y maturity, so 2024-11-25 with a 2027-06-20 maturity is 2.5Y. Quarterly maturities (20 Mar / 20 Sep) give quarter-year values (2.75 ...)."""
+    td, mat = pd.DatetimeIndex(pd.to_datetime(pd.Series(trade_date).values)), pd.DatetimeIndex(pd.to_datetime(pd.Series(maturity).values))
+    m, d = td.month.values, td.day.values
+    after_sep = (m > 9) | ((m == 9) & (d >= 20))
+    after_mar = (m > 3) | ((m == 3) & (d >= 20))
+    five_year = td.year.values + 5 - (~after_mar).astype(int) * 1            # before 20 Mar: the 5Y is the 20 Dec four years on
+    five_month = (after_sep * 12) + (~after_sep & after_mar) * 6 + (~after_mar) * 12   # after 20 Sep: Dec; after 20 Mar: Jun; before 20 Mar: Dec
+    months = (five_year * 12 + five_month) - (mat.year.values * 12 + mat.month.values)
+    out = 5 - months / 12
+    return float(out[0]) if (np.isscalar(trade_date) or isinstance(trade_date, (pd.Timestamp, str))) and len(out) == 1 else out
+
+
+def imm_maturity(trade_date, tenor):
+    """The maturity date (a 20 Jun / 20 Dec for half-year tenors) of the standard `tenor`-year contract on a trade date: the inverse of imm_tenor. E.g. on 2024-11-25 the 5Y matures
+    2029-12-20 and the 2.5Y 2027-06-20."""
+    d = pd.Timestamp(trade_date)
+    if (d.month, d.day) >= (9, 20):
+        five = pd.Timestamp(d.year + 5, 12, 20)
+    elif (d.month, d.day) >= (3, 20):
+        five = pd.Timestamp(d.year + 5, 6, 20)
+    else:
+        five = pd.Timestamp(d.year + 4, 12, 20)
+    return five - pd.DateOffset(months=round((5 - tenor) * 12))
+
+
+def imm_tenor_label(x):
+    """2.5 -> '2.5y', 5 -> '5y'."""
+    return f'{x:g}y'
 
 
 def index_coupon(index_name):

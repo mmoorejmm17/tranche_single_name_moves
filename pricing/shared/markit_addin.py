@@ -197,7 +197,7 @@ class AddinSession:
                     break
         else:
             return None, f'timeout after {timeout}s (marker {expect})'
-        vals = ws.range(ws.cells(top + 1, 3), ws.cells(top + expect, 2 + len(FIELDS) + 1)).value
+        vals = ws.range(ws.cells(top + 1, 3), ws.cells(top + expect, 2 + len(FIELDS) + 1)).options(ndim=2).value      # ndim=2: a one-row result must not come back as a flat list
         hdr = ['id'] + list(FIELDS.keys())
         df = pd.DataFrame(vals[1:] if isinstance(vals[0][0], str) and vals[0][0] == 'Identifier' else vals, columns=hdr)
         return df, ''
