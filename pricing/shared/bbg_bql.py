@@ -14,10 +14,11 @@ import time
 import pandas as pd
 
 MAPPINGS = 'S:/Structured Credit/Matt Stuff/cds_mappings/cds_mappings_final.csv'
-# equity ticker used for debt(): the ultimate parent first (issuedby='CAST_PARENT_SUBS' then walks parent + subsidiaries), else the entity's own BBG_Equity_Ticker, else the public-equity entity.
-# Open question (user, 2026-11-03): BBG_Equity_Ticker first instead? It differs from the parent for ~190 of 514 names and is often a placeholder id (MPW: 0750910D US Equity vs MPT US Equity).
-EQUITY_COLS = ['Ultimate_Parent_Equity_Ticker', 'BBG_Equity_Ticker', 'CDS_Public_Equity_Entity_Ticker']
-FIELDS = "id, name, srch_asset_class, crncy, issue_dt, maturity, amt_outstanding(currency=USD), amt_outstanding, cpn"
+# equity ticker used for debt(): the entity's OWN BBG_Equity_Ticker first (user decision 2026-11-06: holdco debt is not deliverable into an opco CDS, and the ultimate-parent id of a private
+# parent is often a placeholder that resolves to unrelated debt, e.g. ADRBID: 2496Z LN Equity -> GRLABC loans), then the ultimate parent, then the public-equity entity.
+# issuedby='CAST_PARENT_SUBS' still expands from that entity: CHECK names afterwards in case it pulls in holdco / parent-level debt.
+EQUITY_COLS = ['BBG_Equity_Ticker', 'Ultimate_Parent_Equity_Ticker', 'CDS_Public_Equity_Entity_Ticker']
+FIELDS = "id, name, srch_asset_class, crncy, issue_dt, maturity, amt_outstanding(currency=USD), amt_outstanding, ln_tranche_size, amount_outstanding_as_of_dt, cpn, px_last"
 ISSUEDBY = 'CAST_PARENT_SUBS'
 
 

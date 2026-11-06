@@ -2,9 +2,9 @@
 
     python pricing/shared/debt_snapshot.py run [--limit N]     # query the whole mappings universe -> cache/debt/debt_YYYY-MM-DD.parquet (resumable: finished batches are kept)
     python pricing/shared/debt_snapshot.py diff                # newest snapshot vs the one before it (added / removed / changed securities)
-One BQL query per UNIQUE parent equity ticker (several CDS names share one), then rows are copied to every market_cds_ticker that maps to it. Banks return tens of thousands of notes,
+One BQL query per UNIQUE equity ticker (own BBG_Equity_Ticker first; several CDS names can share one), then rows are copied to every market_cds_ticker that maps to it. Banks return tens of thousands of notes,
 so a full run takes roughly 20-30 min; run it about weekly. Columns: market_cds_ticker, equity_ticker, security_id, security_name, asset_class, currency, issue_date, maturity,
-notional_outstanding (USD, as Bloomberg reports amt_outstanding), coupon, payment_rank, pulled_at.
+notional_outstanding (USD), notional_local (own currency), notional_total (loans: tranche size; bonds: = outstanding), amt_out_asof (date of the outstanding amount), coupon, payment_rank, security_type (Bloomberg: TERM, REV, LOC, DELAY-DRAW TERM, GLOBAL, ...), pulled_at.
 """
 import sys
 import time
@@ -17,11 +17,11 @@ import bbg_bql as b
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT = ROOT / 'cache' / 'debt'
-FIELDS = b.FIELDS + ', payment_rank'
+FIELDS = b.FIELDS + ', payment_rank, security_typ'
 RENAME = {'id': 'security_id', 'name': 'security_name', 'srch_asset_class': 'asset_class', 'crncy': 'currency', 'issue_dt': 'issue_date',
-          'amt_outstanding(currency=USD)': 'notional_outstanding', 'amt_outstanding': 'notional_local', 'cpn': 'coupon'}
-COLS = ['market_cds_ticker', 'equity_ticker', 'security_id', 'security_name', 'asset_class', 'currency', 'issue_date', 'maturity',
-        'notional_outstanding', 'notional_local', 'coupon', 'payment_rank', 'pulled_at']
+          'amt_outstanding(currency=USD)': 'notional_outstanding', 'amt_outstanding': 'notional_local', 'ln_tranche_size': 'tranche_size', 'amount_outstanding_as_of_dt': 'amt_out_asof', 'cpn': 'coupon', 'px_last': 'last_price', 'security_typ': 'security_type'}
+COLS = ['market_cds_ticker', 'equity_ticker', 'security_id', 'security_name', 'last_price', 'asset_class', 'currency', 'issue_date', 'maturity',
+        'notional_outstanding', 'notional_local', 'notional_total', 'amt_out_asof', 'coupon', 'payment_rank', 'security_type', 'pulled_at']
 KEY = ['market_cds_ticker', 'security_id']
 MTN_TYPES = ['DOMESTIC MTN', 'EURO MTN']                      # security_typ values dropped (medium-term notes); preferreds / other asset classes dropped by the asset-class filter
 MAX_PER_PARENT = 100                                          # keep the largest N securities (USD notional) per parent: for huge capital structures the big picture is what matters
@@ -42,10 +42,10 @@ def query(e):
 
 
 def alternates():
-    """market_cds_ticker -> fallback equity tickers (own BBG_Equity_Ticker, then the public-equity entity), used only for names whose parent ticker returns nothing."""
+    """market_cds_ticker -> fallback equity tickers (ultimate parent, then the public-equity entity), used only for names whose parent ticker returns nothing."""
     m = pd.read_csv(b.MAPPINGS, dtype=str, encoding='cp1252').drop_duplicates('CDS_Ticker').set_index('CDS_Ticker')
     bad = ('', '--', 'NaN', 'nan')
-    return {t: [v.strip() for c in ('BBG_Equity_Ticker', 'CDS_Public_Equity_Entity_Ticker') if isinstance(v := r.get(c), str) and v.strip() not in bad]
+    return {t: [v.strip() for c in ('Ultimate_Parent_Equity_Ticker', 'CDS_Public_Equity_Entity_Ticker') if isinstance(v := r.get(c), str) and v.strip() not in bad]
             for t, r in m.iterrows()}
 
 
@@ -108,6 +108,7 @@ def run(batch=20, timeout=900, limit=None, log=print):
     allp = allp.rename(columns=RENAME).drop(columns='ID', errors='ignore')
     allp = allp[allp.maturity.isna() | (allp.maturity >= today)]                 # drop instruments that have already matured (perpetuals have no maturity and stay)
     allp = allp.sort_values('notional_outstanding', ascending=False, na_position='last').groupby('equity_ticker', sort=False).head(MAX_PER_PARENT)
+    allp['notional_total'] = allp.tranche_size.where(allp.asset_class.eq('Loans'), allp.notional_local)   # loans: facility (tranche) size; bonds can't be redrawn, so total = amount outstanding
     snap = uni.merge(allp, on='equity_ticker', how='inner')                     # copy each parent's rows to every CDS name that maps to it
     snap['pulled_at'] = pd.Timestamp.now().floor('s')
     snap = snap[COLS].drop_duplicates(KEY).reset_index(drop=True)

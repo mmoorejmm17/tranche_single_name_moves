@@ -1,4 +1,4 @@
-# tranche_single_name_moves
+# single_name_manager
 
 ## Project layout (pricing / analysis split, 2026-10-26)
 Writing the data and using it are separate exercises. The data is ONE standalone published store (`data/base`) that only the owner (Matt) writes, by running `pricing/shared/publish.py`; everyone else only READS it.
@@ -25,6 +25,8 @@ cache/      the pricing WORKING area (gitignored); analysis never reads it:
               cache/work/   scratch: addin_raw/, tenor_map.parquet, addin_unfilled, addin_fill_errors, priced_parts/ (resumable pricer parts), backups/, proposed_ticker_changes.csv
 docs/       markit_excel_guide/ (Markit add-in user guide and data dictionary).
 archive/    unmapped_members.xlsx (early mapping work, unused by the code).
+credit_analysis/  credit-analysis skill, self-contained (stdlib only, no link to the pricing code): SKILL.md (the instructions, kept as its own file), download_filings.py (SEC EDGAR credit agreements / indentures),
+            companies/{ticker}/ (notes `{ticker}_credit_terms.md`, `{ticker}_fcf.md` are tracked; downloaded `filings/` are gitignored).
 ```
 Workflow (owner), all writing to cache/base (and cache/work) and ending with publish:
 - NEW pricing (daily) is TWO steps (system Python): `python pricing/daily/update.py`, then `python pricing/shared/publish.py`.

@@ -1,5 +1,5 @@
 [project]
-name = "tranche-single-name-moves"
+name = "single-name-manager"
 version = "0.1.0"
 description = ""
 authors = [

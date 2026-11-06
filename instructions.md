@@ -4,13 +4,13 @@ This repo analyses single-name CDS moves inside the CDX / iTraxx indices (spread
 You only need to **use** the data. The data is built and published by one person (Matt Moore) and lives on the shared drive; it is not in GitHub.
 
 ## What you need
-- Access to the shared drive `S:\Structured Credit\Matt Stuff\tranche_single_name_moves\` (the published data is in its `data\base\` folder, about 145 MB, read only for you).
+- Access to the shared drive `S:\Structured Credit\Matt Stuff\single_name_manager\` (the published data is in its `data\base\` folder, about 145 MB, read only for you).
 - Python 3.12+ with `pandas`, `numpy`, `pyarrow`, `ipykernel` (plus Jupyter or VS Code to open notebooks). Nothing else: no Bloomberg, Databricks, Quantifi or Excel.
 
 ## Set up
 ```
-git clone https://github.com/mmoorejmm17/tranche_single_name_moves.git
-cd tranche_single_name_moves
+git clone https://github.com/mmoorejmm17/single_name_manager.git
+cd single_name_manager
 python -m venv .venv
 .venv\Scripts\activate
 pip install pandas numpy pyarrow ipykernel
@@ -28,7 +28,7 @@ pip install pandas numpy pyarrow ipykernel
 ## Where the data is read from
 The data lives in a "store": a folder with `prices\`, `reference\`, `metrics\` and a `MANIFEST.json`. Today there is one store, `base`. The code looks, in order, at: the `CDS_DATA_DIR`
 environment variable (a store folder); this clone's own `data\base\` folder (if it has a `MANIFEST.json`); then the shared-drive store
-`S:\Structured Credit\Matt Stuff\tranche_single_name_moves\data\base`. A fresh clone has no `data\`, so it reads the shared drive automatically. If the drive is mapped to a different letter, or you want a
+`S:\Structured Credit\Matt Stuff\single_name_manager\data\base`. A fresh clone has no `data\`, so it reads the shared drive automatically. If the drive is mapped to a different letter, or you want a
 local copy, copy that `data\base` folder into the clone as `data\base`, or set `CDS_DATA_DIR` to the `base` folder. Never edit files in `data\`.
 
 ## Ground rules

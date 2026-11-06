@@ -15,7 +15,7 @@ import pandas as pd
 # copy (cache/ and config/) before importing this module (pricing/shared/_paths.py); otherwise the defaults below apply.
 ROOT = Path(__file__).resolve().parent.parent      # project root (this file lives in analysis/)
 STORE = os.environ.get('CDS_STORE') or 'base'          # which store: a folder with prices/ reference/ metrics/ MANIFEST.json (today only 'base' exists)
-SHARED_DATA_DIR = Path('S:/Structured Credit/Matt Stuff/tranche_single_name_moves/data') / STORE   # the owner's published store on the shared drive
+SHARED_DATA_DIR = Path('S:/Structured Credit/Matt Stuff/single_name_manager/data') / STORE   # the owner's published store on the shared drive
 
 
 def _default_data_dir():
